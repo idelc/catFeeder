@@ -18,7 +18,7 @@
 // RFID definitions
 #define RST_PIN 2
 #define SS_PIN  15
-#define IRQ_PIN 9
+// #define IRQ_PIN 9
 
 // Stepper definitions
 #define stepsPerRev 64
@@ -38,11 +38,11 @@ bool attachInterruptInterval(unsigned long interval, timer_callback callback);
 // Init RFID
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 // RFID Interrupt helpers
-volatile bool bNewInt = false;
-byte regVal = 0x7F;
-void activateRec(MFRC522 mfrc522);
-void clearInt(MFRC522 mfrc522); 
-void readCard();
+// volatile bool bNewInt = false;
+// byte regVal = 0x7F;
+// void activateRec(MFRC522 mfrc522);
+// void clearInt(MFRC522 mfrc522); 
+// void readCard();
 String write_byte_array(byte *buffer, byte bufferSize);
 
 // Init Stepper Motor
@@ -62,16 +62,20 @@ task taskArray[5];
 
 // Variables
 // Scheduler variables
-const unsigned char tasksNum = 4;
-const unsigned long tasksPeriodGDC = 50;
+const unsigned char tasksNum = 3;
+const unsigned long tasksPeriodGDC = 1000;
+const unsigned long periodMos = 1000;
+const unsigned long periodRFID = 1000;
+const unsigned long periodStep = 1000;
 
 // Motion Sensor variables
 volatile short motionFlag = 0;
 volatile int motionCntr = 0;
 
 // RFID variables
-String tempUid = "";
-const String collarUid = "";
+int tempUid;
+const int collarUid = 0xe3cd820d;
+const int backwardsCollarUid = 0x0D82CDE3;
 volatile int plate = 0;
 //==========================
 
@@ -110,33 +114,50 @@ void setup(){
   delay(4);
   mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max); // max read distance
   /* setup the IRQ pin*/
-  pinMode(IRQ_PIN, INPUT_PULLUP);
-
+  // pinMode(IRQ_PIN, INPUT_PULLUP);
   /*
    * Allow the ... irq to be propagated to the IRQ pin
    * For test purposes propagate the IdleIrq and loAlert
    */
-  regVal = 0xA0; //rx irq
-  mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg, regVal);
+  // regVal = 0xA0; //rx irq
+  // mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg, regVal);
 
-  bNewInt = false; //interrupt flag
+  // bNewInt = false; //interrupt flag
 
   /*Activate the interrupt*/
-  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
+  // attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
 
-  do { //clear a spourious interrupt at start
-    ;
-  } while (!bNewInt);
-  bNewInt = false;
+  // do { //clear a spourious interrupt at start
+  //   ;
+  // } while (!bNewInt);
+  // bNewInt = false;
+  
   // Stepper Motor Init
-  lidMotor.setSpeed(30); // arbitrary speed, 30 rpm
+  lidMotor.setSpeed(60); // arbitrary speed, 30 rpm
+
+  // Motion Sensor Init
+  pinMode(moSens, INPUT);
+  // pinMode(LED_BUILTIN, OUTPUT);
+
   // Scheduler Setup // TODO: Finish once the tasks are done
-  // unsigned i = 0;
-  // taskArray[i].state = ST_Start;
-  // taskArray[i].period = periodLCD;
-  // taskArray[i].elapsedTime = periodLCD;
-  // taskArray[i].TickFct = &lcdScreenSet;
-  // i++;
+  unsigned i = 0;
+  taskArray[i].state = Mos_Start;
+  taskArray[i].period = periodMos;
+  taskArray[i].elapsedTime = periodMos;
+  taskArray[i].TickFct = &TickFct_MoSensor;
+  i++;
+  taskArray[i].state = RFID_Start;
+  taskArray[i].period = periodRFID;
+  taskArray[i].elapsedTime = periodRFID;
+  taskArray[i].TickFct = &TickFct_RFID;
+  i++;
+  taskArray[i].state = Step_Start;
+  taskArray[i].period = periodStep;
+  taskArray[i].elapsedTime = periodStep;
+  taskArray[i].TickFct = &TickFct_Step;
+  
+  // required 1 minute delay for the IR sensor to warm up
+  delay(60000);
 }  
 
 void loop(){
@@ -149,7 +170,7 @@ int TickFct_MoSensor(int state){
       state = Mos_Wait;
       break;
     case Mos_Wait:
-      state = digitalRead(moSens) ? Mos_Detd : Mos_Wait;
+      state = (digitalRead(moSens) == LOW) ? Mos_Detd : Mos_Wait;
       break;
     case Mos_Detd:
       state = Mos_Hold;
@@ -186,12 +207,12 @@ int TickFct_RFID(int state){
   switch(state){
     case RFID_Start:
       state = RFID_off;
-      mfrc522.PCD_SoftPowerDown();
+      // mfrc522.PCD_SoftPowerDown();
       break;
     case RFID_off:
       if(motionFlag){
         state = RFID_waitRead;
-        mfrc522.PCD_SoftPowerUp();
+        // mfrc522.PCD_SoftPowerUp();
       }
       else{
         state = RFID_off;
@@ -203,7 +224,7 @@ int TickFct_RFID(int state){
       }
       else{
         state = RFID_off;
-        mfrc522.PCD_SoftPowerDown();
+        // mfrc522.PCD_SoftPowerDown();
       }
       break;
     default:
@@ -216,18 +237,23 @@ int TickFct_RFID(int state){
     case RFID_off:
       break;
     case RFID_waitRead:
-      tempUid = "";
-      if (bNewInt) { //new read interrupt
-        mfrc522.PICC_ReadCardSerial(); //read the tag data
-        clearInt(mfrc522);
+      tempUid = 0;
+      // if (bNewInt) { //new read interrupt
+      //   mfrc522.PICC_ReadCardSerial(); //read the tag data
+      //   clearInt(mfrc522);
+      //   mfrc522.PICC_HaltA();
+      //   bNewInt = false;
+      // }
+      // // The receiving block needs regular retriggering (tell the tag it should transmit??)
+      // // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
+      // activateRec(mfrc522);
+      // if(write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size) == collarUid){
+      //   if(plate == 0){plate = 1;};
+      // }
+      if(mfrc522.PICC_ReadCardSerial()){
         mfrc522.PICC_HaltA();
-        bNewInt = false;
-      }
-      // The receiving block needs regular retriggering (tell the tag it should transmit??)
-      // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
-      activateRec(mfrc522);
-      if(write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size) == collarUid){
-        if(plate == 0){plate = 1};
+        tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+        if(tempUid == backwardsCollarUid){plate = 1;}
       }
       break;
     default:
@@ -279,11 +305,10 @@ int TickFct_Step(int state){ // TODO: needs testing
 /**
  * Helper routine to return a byte array as string.
  */
-String write_byte_array(byte *buffer, byte bufferSize) {
-  String retId;
+int write_byte_array(byte *buffer, byte bufferSize) {
+  int retId = 0x00;
   for (byte i = 0; i < bufferSize; i++) {
-    retId = retId + (buffer[i] < 0x10 ? " 0" : " ");
-    retId = retId + String(buffer[i], HEX);
+    retId = retId | buffer[i] << (i*8);
   }
   return retId;
 }
