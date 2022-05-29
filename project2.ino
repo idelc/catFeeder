@@ -1,4 +1,5 @@
 // RFID code adapted from MFRC522 library examples and documentation!
+// Stepper motor library not controlling motor as expected, needed to controll wire by wire
 
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
@@ -21,7 +22,10 @@
 // #define IRQ_PIN 9
 
 // Stepper definitions
-#define stepsPerRev 64
+#define inOne 16
+#define inTwo 5
+#define inThr 4
+#define inFou 0
 
 // Motion Sensor definitions
 #define moSens 10
@@ -43,10 +47,7 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 // void activateRec(MFRC522 mfrc522);
 // void clearInt(MFRC522 mfrc522); 
 // void readCard();
-String write_byte_array(byte *buffer, byte bufferSize);
-
-// Init Stepper Motor
-Stepper lidMotor(stepsPerRev, 16, 5, 4, 0);
+int write_byte_array(byte *buffer, byte bufferSize);
 
 // Task Struct for Task Scheduler
 typedef struct task{
@@ -77,6 +78,9 @@ int tempUid;
 const int collarUid = 0xe3cd820d;
 const int backwardsCollarUid = 0x0D82CDE3;
 volatile int plate = 0;
+
+// Stepper Vars
+volatile short openLid = 0;
 //==========================
 
 void IRAM_ATTR TimerHandler(){
@@ -102,6 +106,9 @@ enum Step_States{Step_Start, Step_off, Step_open, Step_hold, Step_close};
 int TickFct_Step(int state);
 
 void setup(){ 
+  // required 1 minute delay for the IR sensor to warm up
+  delay(60000);
+
   // Timer Init
   // Set Interval in microsecs
   if (!ITimer.attachInterruptInterval(tasksPeriodGDC * 1000, TimerHandler))
@@ -133,8 +140,10 @@ void setup(){
   // bNewInt = false;
   
   // Stepper Motor Init
-  lidMotor.setSpeed(60); // arbitrary speed, 30 rpm
-
+  pinMode(inOne, OUTPUT);
+  pinMode(inTwo, OUTPUT);
+  pinMode(inThr, OUTPUT);
+  pinMode(inFou, OUTPUT);
   // Motion Sensor Init
   pinMode(moSens, INPUT);
   // pinMode(LED_BUILTIN, OUTPUT);
@@ -155,13 +164,64 @@ void setup(){
   taskArray[i].period = periodStep;
   taskArray[i].elapsedTime = periodStep;
   taskArray[i].TickFct = &TickFct_Step;
-  
-  // required 1 minute delay for the IR sensor to warm up
-  delay(60000);
 }  
 
+volatile unsigned long timeTill = 0;
+const int stepCheck = 60000;
 void loop(){
-  // Empty, code will only be executed on interrupt :D
+  if( millis() >= (timeTill + stepCheck)){
+    timeTill += stepCheck;
+    if(openLid == 1){
+      for(unsigned i = 0; i < 129; i++){
+        digitalWrite(inOne, LOW);
+        digitalWrite(inTwo, LOW);
+        digitalWrite(inThr, HIGH);
+        digitalWrite(inFou, HIGH);
+        delay(10);
+        digitalWrite(inOne, LOW);
+        digitalWrite(inTwo, HIGH);
+        digitalWrite(inThr, HIGH);
+        digitalWrite(inFou, LOW);
+        delay(10);
+        digitalWrite(inOne, HIGH);
+        digitalWrite(inTwo, HIGH);
+        digitalWrite(inThr, LOW);
+        digitalWrite(inFou, LOW);
+        delay(10);
+        digitalWrite(inOne, HIGH);
+        digitalWrite(inTwo, LOW);
+        digitalWrite(inThr, LOW);
+        digitalWrite(inFou, HIGH);
+        delay(10);
+      }
+      openLid = 2;
+    }
+    else if(openLid == 0){
+      for(unsigned i = 0; i < 129; i++){
+        digitalWrite(inOne, HIGH);
+        digitalWrite(inTwo, LOW);
+        digitalWrite(inThr, LOW);
+        digitalWrite(inFou, HIGH);
+        delay(10);
+        digitalWrite(inOne, HIGH);
+        digitalWrite(inTwo, HIGH);
+        digitalWrite(inThr, LOW);
+        digitalWrite(inFou, LOW);
+        delay(10);
+        digitalWrite(inOne, LOW);
+        digitalWrite(inTwo, HIGH);
+        digitalWrite(inThr, HIGH);
+        digitalWrite(inFou, LOW);
+        delay(10); 
+        digitalWrite(inOne, LOW);
+        digitalWrite(inTwo, LOW);
+        digitalWrite(inThr, HIGH);
+        digitalWrite(inFou, HIGH);
+        delay(10);
+      }
+      openLid = 2;
+    }
+  }
 }
 
 int TickFct_MoSensor(int state){
@@ -170,13 +230,13 @@ int TickFct_MoSensor(int state){
       state = Mos_Wait;
       break;
     case Mos_Wait:
-      state = (digitalRead(moSens) == LOW) ? Mos_Detd : Mos_Wait;
+      state = (digitalRead(moSens) == LOW) ? Mos_Detd : Mos_Wait; // set to low due to testing
       break;
     case Mos_Detd:
       state = Mos_Hold;
       break;
     case Mos_Hold:
-      state = (motionCntr < 30) ? Mos_Wait : Mos_Hold;  // Arbitrarily set to 30. TODO: Set to meaningful number
+      state = (motionCntr < 60) ? Mos_Wait : Mos_Hold;  // Set to 1 min. TODO: Set to meaningful number
       break;
     default:
       state = Mos_Start;
@@ -187,6 +247,7 @@ int TickFct_MoSensor(int state){
       break;
     case Mos_Wait:
       motionFlag = 0;
+      motionCntr = 0;
       break;
     case Mos_Detd:
       motionFlag = 1;
@@ -274,7 +335,7 @@ int TickFct_Step(int state){ // TODO: needs testing
       state = Step_hold;
       break;
     case Step_hold:
-      state = (plate > 50) ? Step_close : Step_hold; // TODO: set to more meaningful num than 50
+      state = (plate > 60) ? Step_close : Step_hold; // TODO: set to more meaningful num than 50
       break;
     case Step_close:
       state = Step_off;
@@ -289,12 +350,13 @@ int TickFct_Step(int state){ // TODO: needs testing
     case Step_off:
       break;
     case Step_open:
-      lidMotor.step(32);
+      openLid = 1;
       break;
     case Step_hold:
       break;
     case Step_close:
-      lidMotor.step(-32);
+      plate = 0;
+      openLid = 0;
       break;
     default:
       break;  
@@ -315,23 +377,23 @@ int write_byte_array(byte *buffer, byte bufferSize) {
 /**
  * MFRC522 interrupt serving routine
  */
-void readCard() {
-  bNewInt = true;
-}
+// void readCard() {
+//   bNewInt = true;
+// }
 
 /*
  * The function sending to the MFRC522 the needed commands to activate the reception
  */
-void activateRec(MFRC522 mfrc522) {
-  mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg, mfrc522.PICC_CMD_REQA);
-  mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_Transceive);
-  mfrc522.PCD_WriteRegister(mfrc522.BitFramingReg, 0x87);
-}
+// void activateRec(MFRC522 mfrc522) {
+//   mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg, mfrc522.PICC_CMD_REQA);
+//   mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_Transceive);
+//   mfrc522.PCD_WriteRegister(mfrc522.BitFramingReg, 0x87);
+// }
 
 /*
  * The function to clear the pending interrupt bits after interrupt serving routine
  */
-void clearInt(MFRC522 mfrc522) {
-  mfrc522.PCD_WriteRegister(mfrc522.ComIrqReg, 0x7F);
-}
+// void clearInt(MFRC522 mfrc522) {
+//   mfrc522.PCD_WriteRegister(mfrc522.ComIrqReg, 0x7F);
+// }
 // END RFID Helper Functions ==================================================================
