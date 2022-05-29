@@ -1,3 +1,5 @@
+// RFID code adapted from MFRC522 library examples and documentation!
+
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
 
@@ -41,6 +43,7 @@ byte regVal = 0x7F;
 void activateRec(MFRC522 mfrc522);
 void clearInt(MFRC522 mfrc522); 
 void readCard();
+String write_byte_array(byte *buffer, byte bufferSize);
 
 // Init Stepper Motor
 Stepper lidMotor(stepsPerRev, 16, 5, 4, 0);
@@ -69,7 +72,7 @@ volatile int motionCntr = 0;
 // RFID variables
 String tempUid = "";
 const String collarUid = "";
-int plates[3] = {0,0,0};
+volatile int plate = 0;
 //==========================
 
 void IRAM_ATTR TimerHandler(){
@@ -88,8 +91,11 @@ void IRAM_ATTR TimerHandler(){
 enum MoS_States{Mos_Start, Mos_Wait, Mos_Detd, Mos_Hold};
 int TickFct_MoSensor(int state);
 
-enum RFID_States {RFID_Start, RFID_off, RFID_waitRead};
+enum RFID_States{RFID_Start, RFID_off, RFID_waitRead};
 int TickFct_RFID(int state);
+
+enum Step_States{Step_Start, Step_off, Step_open, Step_hold, Step_close};
+int TickFct_Step(int state);
 
 void setup(){ 
   // Timer Init
@@ -221,11 +227,51 @@ int TickFct_RFID(int state){
       // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
       activateRec(mfrc522);
       if(write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size) == collarUid){
-        plates[0] = 1;
+        if(plate == 0){plate = 1};
       }
       break;
     default:
       break;
+  }
+  return state;
+}
+
+int TickFct_Step(int state){ // TODO: needs testing
+  switch(state){
+    case Step_Start:
+      state = Step_off;
+      break;
+    case Step_off:
+      state = plate ? Step_open : Step_off;
+      break;
+    case Step_open:
+      state = Step_hold;
+      break;
+    case Step_hold:
+      state = (plate > 50) ? Step_close : Step_hold; // TODO: set to more meaningful num than 50
+      break;
+    case Step_close:
+      state = Step_off;
+      break;
+    default:
+      state = Step_Start;
+      break;  
+  }
+  switch(state){
+    case Step_Start:
+      break;
+    case Step_off:
+      break;
+    case Step_open:
+      lidMotor.step(32);
+      break;
+    case Step_hold:
+      break;
+    case Step_close:
+      lidMotor.step(-32);
+      break;
+    default:
+      break;  
   }
 }
 
