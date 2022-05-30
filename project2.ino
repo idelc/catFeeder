@@ -8,6 +8,7 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Ethernet.h>
+#include <BlynkSimpleEsp8266.h>
 
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
@@ -41,6 +42,12 @@
 // WIFI definitions
 #define JSON_CONFIG_FILE "/test_config.json"
 
+// Blynk definitions
+#define BLYNK_TEMPLATE_ID           "TMPLmoqm3e2E"
+#define BLYNK_DEVICE_NAME           "Quickstart Device"
+#define BLYNK_AUTH_TOKEN            "uRi1Nb1g2Zk4JCakmvTZub8mUyJATaHh"
+#define BLYNK_PRINT Serial
+
 //==========================
 
 
@@ -69,8 +76,17 @@ void saveConfigCallback();
 void configModeCallback(WiFiManager *myWiFiManager);
 
 // Init Server
-WiFiServer server(80);
-String prepareHtmlPage();
+// WiFiServer server(80); // didnt work
+// String prepareHtmlPage();
+// BlynkTimer timer;
+
+// // This function is called every time the device is connected to the Blynk.Cloud
+// BLYNK_CONNECTED();
+
+// // This function sends Arduino's uptime every second to Virtual Pin 2.
+// void myTimerEvent();
+// couldnt get Blynk to work for now
+
 
 // Task Struct for Task Scheduler
 typedef struct task{
@@ -112,6 +128,11 @@ unsigned long numFeed = 0;
 char catNameResp[50] = ""; 
 bool shouldSaveConfig = false;
 
+// Blynk vars
+// char auth[] = BLYNK_AUTH_TOKEN;
+// char ssid[] = "";
+// char pass[] = "";
+
 //==========================
 
 volatile int tFlag = 0;
@@ -139,7 +160,7 @@ void setup(){
     Serial.println(F("Forcing config mode as there is no saved config"));
     forceConfig = true;
   }
-  // wm.resetSettings(); // TODO: remove when ready
+  wm.resetSettings(); // TODO: remove when ready
   WiFi.mode(WIFI_STA);
   Serial.begin(9600);
   while (!Serial);
@@ -148,19 +169,51 @@ void setup(){
   wm.setAPCallback(configModeCallback);
   wm.setDebugOutput(false);
   WiFiManagerParameter catName("catNameIn", "Enter the cat's name here", catNameResp, 50);
+  // Need to convert numerical input to string to display the default value.
+  char convertedValue[6];
+  sprintf(convertedValue, "%lu", numFeed); 
+  WiFiManagerParameter numTimesFed("numTimesCatFed", "How many times cat has been fed", convertedValue, 7); 
   wm.addParameter(&catName);
+  wm.addParameter(&numTimesFed);
   // wm.setConfigPortalBlocking(false);
   // wm.setConfigPortalTimeout(60);
   //automatically connect using saved credentials if they exist
   //If connection fails it starts an access point with the specified name
-  while(!wm.autoConnect("CatFeeder", "password"));
+  if (forceConfig)
+    // Run if we need a configuration
+  {
+    if (!wm.startConfigPortal("CatFeeder", "password"))
+    {
+      Serial.println("failed to connect and hit timeout");
+      delay(3000);
+      //reset and try again, or maybe put it to deep sleep
+      ESP.restart();
+      delay(5000);
+    }
+  }
+  else
+  {
+    while(!wm.autoConnect("CatFeeder", "password"));
+  }
   Serial.println("Wifi connected");
   Serial.println(WiFi.localIP());
   strncpy(catNameResp, catName.getValue(), sizeof(catNameResp));
   Serial.print("Name of Users Cat: ");
   Serial.println(catNameResp);
+  numFeed = atoi(numTimesFed.getValue());
+  Serial.print("Num times fed: ");
+  Serial.println(numFeed);
   if(shouldSaveConfig){saveConfigFile();}
-  server.begin();
+  // server.begin();
+  // wm.getWiFiSSID().toCharArray(ssid, wm.getWiFiSSID().length());
+  // wm.getWiFiPass().toCharArray(pass, wm.getWiFiPass().length());
+  // Blynk.begin(auth, ssid, pass);
+  // You can also specify server:
+  //Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
+  //Blynk.begin(auth, ssid, pass, IPAddress(192,168,1,100), 8080);
+
+  // Setup a function to be called every second
+  // timer.setInterval(1000L, myTimerEvent);
   //catNameResp = catName.getValue();
   // required 1 minute delay for the IR sensor to warm up
   // reduced for wifi startup
@@ -321,39 +374,41 @@ void loop(){
       }
   }
 
-  WiFiClient client = server.available();
-  // wait for a client (web browser) to connect
-  if (client)
-  {
-    Serial.println("\n[Client connected]");
-    while (client.connected())
-    {
-      // read line by line what the client (web browser) is requesting
-      if (client.available())
-      {
-        String line = client.readStringUntil('\r');
-        Serial.print(line);
-        // wait for end of client's request, that is marked with an empty line
-        if (line.length() == 1 && line[0] == '\n')
-        {
-          client.println(prepareHtmlPage());
-          break;
-        }
-      }
-    }
+  // WiFiClient client = server.available();
+  // // wait for a client (web browser) to connect
+  // if (client)
+  // {
+  //   Serial.println("\n[Client connected]");
+  //   while (client.connected())
+  //   {
+  //     // read line by line what the client (web browser) is requesting
+  //     if (client.available())
+  //     {
+  //       String line = client.readStringUntil('\r');
+  //       Serial.print(line);
+  //       // wait for end of client's request, that is marked with an empty line
+  //       if (line.length() == 1 && line[0] == '\n')
+  //       {
+  //         client.println(prepareHtmlPage());
+  //         break;
+  //       }
+  //     }
+  //   }
 
-    while (client.available()) {
-      // but first, let client finish its request
-      // that's diplomatic compliance to protocols
-      // (and otherwise some clients may complain, like curl)
-      // (that is an example, prefer using a proper webserver library)
-      client.read();
-    }
+  //   while (client.available()) {
+  //     // but first, let client finish its request
+  //     // that's diplomatic compliance to protocols
+  //     // (and otherwise some clients may complain, like curl)
+  //     // (that is an example, prefer using a proper webserver library)
+  //     client.read();
+  //   }
 
-    // close the connection:
-    client.stop();
-    Serial.println("[Client disconnected]");
-  }
+  //   // close the connection:
+  //   client.stop();
+  //   Serial.println("[Client disconnected]");
+  // }
+  // Blynk.run();
+  // timer.run();
 }
 
 int TickFct_MoSensor(int state){
@@ -504,9 +559,13 @@ int TickFct_Step(int state){ // TODO: needs testing
       Serial.println("Step Off");
       break;
     case Step_open:
-      Serial.println("Step Open");
+      Serial.println("Step Open\n");
       openLid = 1;
       numFeed++;
+      Serial.print(catNameResp);
+      Serial.print(" has eaten ");
+      Serial.print(numFeed);
+      Serial.println(" times");
       break;
     case Step_hold:
       plate++;
@@ -562,7 +621,8 @@ int write_byte_array(byte *buffer, byte bufferSize) {
 // Wifi helper Functions=======================================================================
 void saveConfigFile(){
   StaticJsonDocument<512> json;
-  json["userCatName"] = catNameResp;
+  json["userCatName"] = catNameResp; 
+  json["numFeed"] = numFeed; 
   File configFile = LittleFS.open(JSON_CONFIG_FILE, "w");
   if(!configFile){Serial.println("Error spiff");}
   serializeJsonPretty(json, Serial);
@@ -601,6 +661,7 @@ bool loadConfigFile()
           Serial.println("Parsing JSON");
  
           strcpy(catNameResp, json["userCatName"]);
+          numFeed = json["numFeed"].as<int>();
  
           return true;
         }
@@ -644,21 +705,39 @@ void configModeCallback(WiFiManager *myWiFiManager)
 
 // Wifi Server Helper Functions ==========================================
 // prepare a web page to be send to a client (web browser)
-String prepareHtmlPage()
-{
-  String htmlPage;
-  htmlPage.reserve(1024);               // prevent ram fragmentation
-  htmlPage = F("HTTP/1.1 200 OK\r\n"
-               "Content-Type: text/html\r\n"
-               "Connection: close\r\n"  // the connection will be closed after completion of the response
-               "Refresh: 60\r\n"         // refresh the page automatically every 5 sec
-               "\r\n"
-               "<!DOCTYPE HTML>"
-               "<html>"
-               "");
-  htmlPage = htmlPage + catNameResp + " has eaten " + static_cast<String>(numFeed) + " times";
-  htmlPage += numFeed;
-  htmlPage += F("</html>"
-                "\r\n");
-  return htmlPage;
-}
+// String prepareHtmlPage()
+// {
+//   String htmlPage;
+//   htmlPage.reserve(1024);               // prevent ram fragmentation
+//   htmlPage = F("HTTP/1.1 200 OK\r\n"
+//                "Content-Type: text/html\r\n"
+//                "Connection: close\r\n"  // the connection will be closed after completion of the response
+//                "Refresh: 60\r\n"         // refresh the page automatically every 5 sec
+//                "\r\n"
+//                "<!DOCTYPE HTML>"
+//                "<html>"
+//                "");
+//   htmlPage = htmlPage + catNameResp + " has eaten " + static_cast<String>(numFeed) + " times";
+//   htmlPage += numFeed;
+//   htmlPage += F("</html>"
+//                 "\r\n");
+//   return htmlPage;
+// }
+
+// This function is called every time the device is connected to the Blynk.Cloud
+// BLYNK_CONNECTED()
+// {
+//   // Change Web Link Button message to "Congratulations!"
+//   Blynk.setProperty(V3, "offImageUrl", "https://static-image.nyc3.cdn.digitaloceanspaces.com/general/fte/congratulations.png");
+//   Blynk.setProperty(V3, "onImageUrl",  "https://static-image.nyc3.cdn.digitaloceanspaces.com/general/fte/congratulations_pressed.png");
+//   Blynk.setProperty(V3, "url", "https://docs.blynk.io/en/getting-started/what-do-i-need-to-blynk/how-quickstart-device-was-made");
+// }
+
+// // This function sends Arduino's uptime every second to Virtual Pin 2.
+// void myTimerEvent()
+// {
+//   // You can send any value at any time.
+//   // Please don't send more that 10 values per second.
+//   Blynk.virtualWrite(V4, catNameResp);
+//   Blynk.virtualWrite(V2, numFeed);
+// }
