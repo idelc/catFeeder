@@ -64,10 +64,10 @@ task taskArray[5];
 // Variables
 // Scheduler variables
 const unsigned char tasksNum = 3;
-const unsigned long tasksPeriodGDC = 1000;
-const unsigned long periodMos = 1000;
-const unsigned long periodRFID = 1000;
-const unsigned long periodStep = 1000;
+const unsigned long tasksPeriodGDC = 3000;
+const unsigned long periodMos = 3000;
+const unsigned long periodRFID = 3000;
+const unsigned long periodStep = 3000;
 
 // Motion Sensor variables
 volatile short motionFlag = 0;
@@ -80,18 +80,12 @@ const int backwardsCollarUid = 0x0D82CDE3;
 volatile int plate = 0;
 
 // Stepper Vars
-volatile short openLid = 0;
+volatile short openLid = 2;
 //==========================
 
+volatile int tFlag = 0;
 void IRAM_ATTR TimerHandler(){
-  unsigned char i;
-  for(i = 0; i < tasksNum; ++i){
-    if(taskArray[i].elapsedTime >= taskArray[i].period){
-      taskArray[i].state = taskArray[i].TickFct(taskArray[i].state);
-      taskArray[i].elapsedTime = 0;
-    }
-    taskArray[i].elapsedTime += tasksPeriodGDC;
-  }
+  tFlag = 1;
 }
 
 //==========================
@@ -107,8 +101,11 @@ int TickFct_Step(int state);
 
 void setup(){ 
   // required 1 minute delay for the IR sensor to warm up
+  Serial.begin(9600);
+  Serial.println("Start up");
   delay(60000);
-
+  Serial.println("Delay over");
+  
   // Timer Init
   // Set Interval in microsecs
   if (!ITimer.attachInterruptInterval(tasksPeriodGDC * 1000, TimerHandler))
@@ -169,6 +166,19 @@ void setup(){
 volatile unsigned long timeTill = 0;
 const int stepCheck = 60000;
 void loop(){
+  if(tFlag){
+    Serial.println("Time");
+    unsigned char i;
+    for(i = 0; i < tasksNum; ++i){
+      if(taskArray[i].elapsedTime >= taskArray[i].period){
+        taskArray[i].state = taskArray[i].TickFct(taskArray[i].state);
+        taskArray[i].elapsedTime = 0;
+      }
+      taskArray[i].elapsedTime += tasksPeriodGDC;
+    }
+    tFlag = 0;
+  }
+
   if( millis() >= (timeTill + stepCheck)){
     timeTill += stepCheck;
     if(openLid == 1){
@@ -194,6 +204,7 @@ void loop(){
         digitalWrite(inFou, HIGH);
         delay(10);
       }
+      Serial.println("Lid Open");
       openLid = 2;
     }
     else if(openLid == 0){
@@ -219,6 +230,7 @@ void loop(){
         digitalWrite(inFou, HIGH);
         delay(10);
       }
+      Serial.println("Lid Closed");
       openLid = 2;
     }
   }
@@ -246,10 +258,12 @@ int TickFct_MoSensor(int state){
     case Mos_Start:
       break;
     case Mos_Wait:
+      Serial.println("Mos Wait");
       motionFlag = 0;
       motionCntr = 0;
       break;
     case Mos_Detd:
+      Serial.println("Mos Detected");
       motionFlag = 1;
       motionCntr = 0;
       break;
@@ -296,6 +310,7 @@ int TickFct_RFID(int state){
     case RFID_Start:
       break;
     case RFID_off:
+      Serial.println("Not Reading");
       break;
     case RFID_waitRead:
       tempUid = 0;
@@ -312,9 +327,16 @@ int TickFct_RFID(int state){
       //   if(plate == 0){plate = 1;};
       // }
       if(mfrc522.PICC_ReadCardSerial()){
+        Serial.println("Read");
         mfrc522.PICC_HaltA();
         tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
-        if(tempUid == backwardsCollarUid){plate = 1;}
+        if(tempUid == backwardsCollarUid){
+          plate = 1;
+          Serial.println("\tMatch");
+        }
+        else{
+          Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
+        }
       }
       break;
     default:
@@ -348,19 +370,23 @@ int TickFct_Step(int state){ // TODO: needs testing
     case Step_Start:
       break;
     case Step_off:
+      Serial.println("Step Off");
       break;
     case Step_open:
+      Serial.println("Step Open");
       openLid = 1;
       break;
     case Step_hold:
       break;
     case Step_close:
+      Serial.println("Step Close");
       plate = 0;
       openLid = 0;
       break;
     default:
       break;  
   }
+  return state;
 }
 
 // RFID Helper Functions =======================================================================
