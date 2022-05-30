@@ -46,7 +46,7 @@
 #define BLYNK_TEMPLATE_ID           "TMPLmoqm3e2E"
 #define BLYNK_DEVICE_NAME           "Quickstart Device"
 #define BLYNK_AUTH_TOKEN            "uRi1Nb1g2Zk4JCakmvTZub8mUyJATaHh"
-#define BLYNK_PRINT Serial
+// #define BLYNK_PRINT Serial
 
 //==========================
 
@@ -282,7 +282,7 @@ volatile unsigned long timeTill = 0;
 const int stepCheck = 5000;
 void loop(){
   if(tFlag){
-    Serial.println("Time");
+    // Serial.println("Time");
     unsigned char i;
     for(i = 0; i < tasksNum; ++i){
       if(taskArray[i].elapsedTime >= taskArray[i].period){
@@ -323,7 +323,7 @@ void loop(){
       digitalWrite(inTwo, LOW);
       digitalWrite(inThr, LOW);
       digitalWrite(inFou, LOW);
-      Serial.println("Lid Open");
+      // Serial.println("Lid Open");
       openLid = 2;
     }
     else if(openLid == 0){
@@ -353,20 +353,20 @@ void loop(){
       digitalWrite(inTwo, LOW);
       digitalWrite(inThr, LOW);
       digitalWrite(inFou, LOW);
-      Serial.println("Lid Closed");
+      // Serial.println("Lid Closed");
       openLid = 2;
     }
   }
   if(rfidRead){
     if(!mfrc522.PICC_IsNewCardPresent()){return;}
-    Serial.println("Trying to Read");
+    // Serial.println("Trying to Read");
     if(mfrc522.PICC_ReadCardSerial()){
-        Serial.println("Read");
+        // Serial.println("Read");
         mfrc522.PICC_HaltA();
         tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
         if(tempUid == backwardsCollarUid){
           plate = 1;
-          Serial.println("\tMatch");
+          // Serial.println("\tMatch");
         }
         else{
           Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
@@ -442,12 +442,12 @@ int TickFct_MoSensor(int state){
     case Mos_Start:
       break;
     case Mos_Wait:
-      Serial.println("Mos Wait");
+      // Serial.println("Mos Wait");
       motionFlag = 0;
       motionCntr = 0;
       break;
     case Mos_Detd:
-      Serial.println("Mos Detected");
+      // Serial.println("Mos Detected");
       motionFlag = 1;
       motionCntr = 0;
       break;
@@ -494,7 +494,7 @@ int TickFct_RFID(int state){
     case RFID_Start:
       break;
     case RFID_off:
-      Serial.println("Not Reading");
+      // Serial.println("Not Reading");
       rfidRead = 0;
       break;
     case RFID_waitRead:
@@ -556,10 +556,10 @@ int TickFct_Step(int state){ // TODO: needs testing
     case Step_Start:
       break;
     case Step_off:
-      Serial.println("Step Off");
+      // Serial.println("Step Off");
       break;
     case Step_open:
-      Serial.println("Step Open\n");
+      // Serial.println("Step Open\n");
       openLid = 1;
       numFeed++;
       Serial.print(catNameResp);
@@ -569,11 +569,11 @@ int TickFct_Step(int state){ // TODO: needs testing
       break;
     case Step_hold:
       plate++;
-      Serial.print("Step hold... ");
-      Serial.println(plate);
+      // Serial.print("Step hold... ");
+      // Serial.println(plate);
       break;
     case Step_close:
-      Serial.println("Step Close");
+      // Serial.println("Step Close");
       plate = 0;
       openLid = 0;
       break;
