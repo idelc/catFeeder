@@ -1,5 +1,7 @@
 // RFID code adapted from MFRC522 library examples and documentation!
 // Stepper motor library not controlling motor as expected, needed to controll wire by wire
+#include <ESP8266WiFi.h>            // Wifi Library
+#include <WiFiManager.h>
 
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
@@ -31,6 +33,7 @@
 #define moSens 10
 
 //==========================
+
 
 // Init ESP8266 only and only Timer 1
 ESP8266Timer ITimer; 
@@ -65,13 +68,14 @@ task taskArray[5];
 // Scheduler variables
 const unsigned char tasksNum = 3;
 const unsigned long tasksPeriodGDC = 3000;
-const unsigned long periodMos = 3000;
+const unsigned long periodMos = 6000;
 const unsigned long periodRFID = 3000;
 const unsigned long periodStep = 3000;
 
 // Motion Sensor variables
 volatile short motionFlag = 0;
 volatile int motionCntr = 0;
+volatile short motionFilter = 0;
 
 // RFID variables
 int tempUid;
@@ -101,10 +105,28 @@ enum Step_States{Step_Start, Step_off, Step_open, Step_hold, Step_close};
 int TickFct_Step(int state);
 
 void setup(){ 
-  // required 1 minute delay for the IR sensor to warm up
+  WiFiManager wm;
+  // wm.resetSettings(); // TODO: remove when ready
+  WiFi.mode(WIFI_STA);
   Serial.begin(9600);
+  while (!Serial);
+  
+  // wm.setDebugOutput(false);
+  
+  // wifi init
+  // wm.setConfigPortalBlocking(false);
+  // wm.setConfigPortalTimeout(60);
+  //automatically connect using saved credentials if they exist
+  //If connection fails it starts an access point with the specified name
+
+  while(!wm.autoConnect("CatFeeder", "password"));
+  Serial.println("Wifi connected");
+  Serial.println(WiFi.localIP());
+
+  // required 1 minute delay for the IR sensor to warm up
+  // reduced for wifi startup
   Serial.println("Start up");
-  delay(60000);
+  delay(30000);
   Serial.println("Delay over");
   
   // Timer Init
@@ -267,13 +289,22 @@ int TickFct_MoSensor(int state){
       state = Mos_Wait;
       break;
     case Mos_Wait:
-      state = (digitalRead(moSens) == LOW) ? Mos_Detd : Mos_Wait; // set to low due to testing
+      if((digitalRead(moSens) == LOW)){ // set to low due to testing
+        if(!motionFilter){
+          motionFilter = 1;
+          state = Mos_Wait;
+        }
+        else{
+          motionFilter = 0;
+          state = Mos_Detd;
+        }
+      }  
       break;
     case Mos_Detd:
       state = Mos_Hold;
       break;
     case Mos_Hold:
-      state = (motionCntr < 60) ? Mos_Wait : Mos_Hold;  // Set to 1 min. TODO: Set to meaningful number
+      state = (motionCntr < 30) ? Mos_Wait : Mos_Hold;  // Set to 1 min. TODO: Set to meaningful number
       break;
     default:
       state = Mos_Start;
