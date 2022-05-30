@@ -78,6 +78,7 @@ int tempUid;
 const int collarUid = 0xe3cd820d;
 const int backwardsCollarUid = 0x0D82CDE3;
 volatile int plate = 0;
+volatile int rfidRead = 0;
 
 // Stepper Vars
 volatile short openLid = 2;
@@ -164,7 +165,7 @@ void setup(){
 }  
 
 volatile unsigned long timeTill = 0;
-const int stepCheck = 60000;
+const int stepCheck = 5000;
 void loop(){
   if(tFlag){
     Serial.println("Time");
@@ -204,6 +205,10 @@ void loop(){
         digitalWrite(inFou, HIGH);
         delay(10);
       }
+      digitalWrite(inOne, LOW);
+      digitalWrite(inTwo, LOW);
+      digitalWrite(inThr, LOW);
+      digitalWrite(inFou, LOW);
       Serial.println("Lid Open");
       openLid = 2;
     }
@@ -230,9 +235,29 @@ void loop(){
         digitalWrite(inFou, HIGH);
         delay(10);
       }
+      digitalWrite(inOne, LOW);
+      digitalWrite(inTwo, LOW);
+      digitalWrite(inThr, LOW);
+      digitalWrite(inFou, LOW);
       Serial.println("Lid Closed");
       openLid = 2;
     }
+  }
+  if(rfidRead){
+    if(!mfrc522.PICC_IsNewCardPresent()){return;}
+    Serial.println("Trying to Read");
+    if(mfrc522.PICC_ReadCardSerial()){
+        Serial.println("Read");
+        mfrc522.PICC_HaltA();
+        tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+        if(tempUid == backwardsCollarUid){
+          plate = 1;
+          Serial.println("\tMatch");
+        }
+        else{
+          Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
+        }
+      }
   }
 }
 
@@ -311,9 +336,11 @@ int TickFct_RFID(int state){
       break;
     case RFID_off:
       Serial.println("Not Reading");
+      rfidRead = 0;
       break;
     case RFID_waitRead:
-      tempUid = 0;
+      rfidRead = 1;
+      // tempUid = 0;
       // if (bNewInt) { //new read interrupt
       //   mfrc522.PICC_ReadCardSerial(); //read the tag data
       //   clearInt(mfrc522);
@@ -326,18 +353,18 @@ int TickFct_RFID(int state){
       // if(write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size) == collarUid){
       //   if(plate == 0){plate = 1;};
       // }
-      if(mfrc522.PICC_ReadCardSerial()){
-        Serial.println("Read");
-        mfrc522.PICC_HaltA();
-        tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
-        if(tempUid == backwardsCollarUid){
-          plate = 1;
-          Serial.println("\tMatch");
-        }
-        else{
-          Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
-        }
-      }
+      // if(mfrc522.PICC_ReadCardSerial()){
+      //   Serial.println("Read");
+      //   mfrc522.PICC_HaltA();
+      //   tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
+      //   if(tempUid == backwardsCollarUid){
+      //     plate = 1;
+      //     Serial.println("\tMatch");
+      //   }
+      //   else{
+      //     Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
+      //   }
+      // }
       break;
     default:
       break;
@@ -357,7 +384,7 @@ int TickFct_Step(int state){ // TODO: needs testing
       state = Step_hold;
       break;
     case Step_hold:
-      state = (plate > 60) ? Step_close : Step_hold; // TODO: set to more meaningful num than 50
+      state = (plate > 30) ? Step_close : Step_hold; // TODO: set to more meaningful num than 30
       break;
     case Step_close:
       state = Step_off;
@@ -377,6 +404,9 @@ int TickFct_Step(int state){ // TODO: needs testing
       openLid = 1;
       break;
     case Step_hold:
+      plate++;
+      Serial.print("Step hold... ");
+      Serial.println(plate);
       break;
     case Step_close:
       Serial.println("Step Close");
