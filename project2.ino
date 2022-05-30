@@ -1,7 +1,13 @@
 // RFID code adapted from MFRC522 library examples and documentation!
 // Stepper motor library not controlling motor as expected, needed to controll wire by wire
+#define ESP_DRD_USE_SPIFFS true
 #include <ESP8266WiFi.h>            // Wifi Library
 #include <WiFiManager.h>
+// #include <WiFi.h>
+#include <FS.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
+#include <Ethernet.h>
 
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
@@ -32,6 +38,9 @@
 // Motion Sensor definitions
 #define moSens 10
 
+// WIFI definitions
+#define JSON_CONFIG_FILE "/test_config.json"
+
 //==========================
 
 
@@ -51,6 +60,17 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 // void clearInt(MFRC522 mfrc522); 
 // void readCard();
 int write_byte_array(byte *buffer, byte bufferSize);
+
+// Init WiFi
+WiFiManager wm;
+void saveConfigFile(); // From http://dronebotworkshop.com/wifimanager/
+bool loadConfigFile();
+void saveConfigCallback();
+void configModeCallback(WiFiManager *myWiFiManager);
+
+// Init Server
+WiFiServer server(80);
+String prepareHtmlPage();
 
 // Task Struct for Task Scheduler
 typedef struct task{
@@ -86,6 +106,12 @@ volatile int rfidRead = 0;
 
 // Stepper Vars
 volatile short openLid = 2;
+unsigned long numFeed = 0;
+
+// WIFI vars
+char catNameResp[50] = ""; 
+bool shouldSaveConfig = false;
+
 //==========================
 
 volatile int tFlag = 0;
@@ -105,24 +131,37 @@ enum Step_States{Step_Start, Step_off, Step_open, Step_hold, Step_close};
 int TickFct_Step(int state);
 
 void setup(){ 
-  WiFiManager wm;
+  // wifi init
+  bool forceConfig = false;
+  bool spiffsSetup = loadConfigFile();
+  if (!spiffsSetup)
+  {
+    Serial.println(F("Forcing config mode as there is no saved config"));
+    forceConfig = true;
+  }
   // wm.resetSettings(); // TODO: remove when ready
   WiFi.mode(WIFI_STA);
   Serial.begin(9600);
   while (!Serial);
   
-  // wm.setDebugOutput(false);
-  
-  // wifi init
+  wm.setPreSaveConfigCallback(saveConfigCallback);
+  wm.setAPCallback(configModeCallback);
+  wm.setDebugOutput(false);
+  WiFiManagerParameter catName("catNameIn", "Enter the cat's name here", catNameResp, 50);
+  wm.addParameter(&catName);
   // wm.setConfigPortalBlocking(false);
   // wm.setConfigPortalTimeout(60);
   //automatically connect using saved credentials if they exist
   //If connection fails it starts an access point with the specified name
-
   while(!wm.autoConnect("CatFeeder", "password"));
   Serial.println("Wifi connected");
   Serial.println(WiFi.localIP());
-
+  strncpy(catNameResp, catName.getValue(), sizeof(catNameResp));
+  Serial.print("Name of Users Cat: ");
+  Serial.println(catNameResp);
+  if(shouldSaveConfig){saveConfigFile();}
+  server.begin();
+  //catNameResp = catName.getValue();
   // required 1 minute delay for the IR sensor to warm up
   // reduced for wifi startup
   Serial.println("Start up");
@@ -281,6 +320,40 @@ void loop(){
         }
       }
   }
+
+  WiFiClient client = server.available();
+  // wait for a client (web browser) to connect
+  if (client)
+  {
+    Serial.println("\n[Client connected]");
+    while (client.connected())
+    {
+      // read line by line what the client (web browser) is requesting
+      if (client.available())
+      {
+        String line = client.readStringUntil('\r');
+        Serial.print(line);
+        // wait for end of client's request, that is marked with an empty line
+        if (line.length() == 1 && line[0] == '\n')
+        {
+          client.println(prepareHtmlPage());
+          break;
+        }
+      }
+    }
+
+    while (client.available()) {
+      // but first, let client finish its request
+      // that's diplomatic compliance to protocols
+      // (and otherwise some clients may complain, like curl)
+      // (that is an example, prefer using a proper webserver library)
+      client.read();
+    }
+
+    // close the connection:
+    client.stop();
+    Serial.println("[Client disconnected]");
+  }
 }
 
 int TickFct_MoSensor(int state){
@@ -433,6 +506,7 @@ int TickFct_Step(int state){ // TODO: needs testing
     case Step_open:
       Serial.println("Step Open");
       openLid = 1;
+      numFeed++;
       break;
     case Step_hold:
       plate++;
@@ -484,3 +558,107 @@ int write_byte_array(byte *buffer, byte bufferSize) {
 //   mfrc522.PCD_WriteRegister(mfrc522.ComIrqReg, 0x7F);
 // }
 // END RFID Helper Functions ==================================================================
+
+// Wifi helper Functions=======================================================================
+void saveConfigFile(){
+  StaticJsonDocument<512> json;
+  json["userCatName"] = catNameResp;
+  File configFile = LittleFS.open(JSON_CONFIG_FILE, "w");
+  if(!configFile){Serial.println("Error spiff");}
+  serializeJsonPretty(json, Serial);
+  if(serializeJson(json, configFile) == 0){
+    Serial.println(F("Fauled to write to file"));
+  }
+  configFile.close();
+}
+
+bool loadConfigFile()
+// Load existing configuration file
+{
+  // Uncomment if we need to format filesystem
+  // SPIFFS.format();
+ 
+  // Read configuration from FS json
+  Serial.println("Mounting File System...");
+ 
+  // May need to make it begin(true) first time you are using SPIFFS
+  if (LittleFS.begin())
+  {
+    Serial.println("mounted file system");
+    if (LittleFS.exists(JSON_CONFIG_FILE))
+    {
+      // The file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = LittleFS.open(JSON_CONFIG_FILE, "r");
+      if (configFile)
+      {
+        Serial.println("Opened configuration file");
+        StaticJsonDocument<512> json;
+        DeserializationError error = deserializeJson(json, configFile);
+        serializeJsonPretty(json, Serial);
+        if (!error)
+        {
+          Serial.println("Parsing JSON");
+ 
+          strcpy(catNameResp, json["userCatName"]);
+ 
+          return true;
+        }
+        else
+        {
+          // Error loading JSON data
+          Serial.println("Failed to load json config");
+        }
+      }
+    }
+  }
+  else
+  {
+    // Error mounting file system
+    Serial.println("Failed to mount FS");
+  }
+ 
+  return false;
+}
+
+void saveConfigCallback()
+// Callback notifying us of the need to save configuration
+{
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
+}
+ 
+void configModeCallback(WiFiManager *myWiFiManager)
+// Called when config mode launched
+{
+  Serial.println("Entered Configuration Mode");
+ 
+  Serial.print("Config SSID: ");
+  Serial.println(myWiFiManager->getConfigPortalSSID());
+ 
+  Serial.print("Config IP Address: ");
+  Serial.println(WiFi.softAPIP());
+}
+
+////////////////////////////////////////////////////////////////////////
+
+// Wifi Server Helper Functions ==========================================
+// prepare a web page to be send to a client (web browser)
+String prepareHtmlPage()
+{
+  String htmlPage;
+  htmlPage.reserve(1024);               // prevent ram fragmentation
+  htmlPage = F("HTTP/1.1 200 OK\r\n"
+               "Content-Type: text/html\r\n"
+               "Connection: close\r\n"  // the connection will be closed after completion of the response
+               "Refresh: 60\r\n"         // refresh the page automatically every 5 sec
+               "\r\n"
+               "<!DOCTYPE HTML>"
+               "<html>"
+               "");
+  htmlPage = htmlPage + catNameResp + " has eaten " + static_cast<String>(numFeed) + " times";
+  htmlPage += numFeed;
+  htmlPage += F("</html>"
+                "\r\n");
+  return htmlPage;
+}
