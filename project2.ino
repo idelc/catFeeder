@@ -9,6 +9,9 @@
 #include <ArduinoJson.h>
 #include <Ethernet.h>
 #include <BlynkSimpleEsp8266.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 
 #include "ESP8266TimerInterrupt.h"  // Timer libraries
 #include "ESP8266_ISR_Timer.hpp"   
@@ -76,8 +79,9 @@ void saveConfigCallback();
 void configModeCallback(WiFiManager *myWiFiManager);
 
 // Init Server
-// WiFiServer server(80); // didnt work
-// String prepareHtmlPage();
+ESP8266WebServer server(80);
+void prepareHtmlPage();
+void handleNotFound();
 // BlynkTimer timer;
 
 // // This function is called every time the device is connected to the Blynk.Cloud
@@ -96,17 +100,18 @@ typedef struct task{
   int (*TickFct) (int);
 } task;
 
-task taskArray[5];
+task taskArray[4];
 
 //==========================
 
 // Variables
 // Scheduler variables
-const unsigned char tasksNum = 3;
+const unsigned char tasksNum = 4;
 const unsigned long tasksPeriodGDC = 3000;
 const unsigned long periodMos = 6000;
 const unsigned long periodRFID = 3000;
 const unsigned long periodStep = 3000;
+const unsigned long periodWifi = 3000;
 
 // Motion Sensor variables
 volatile short motionFlag = 0;
@@ -150,6 +155,9 @@ int TickFct_RFID(int state);
 
 enum Step_States{Step_Start, Step_off, Step_open, Step_hold, Step_close};
 int TickFct_Step(int state);
+
+enum WiFi_States{WF_Start, WF_Do};
+int TickFct_WF(int state);
 
 void setup(){ 
   // wifi init
@@ -204,7 +212,13 @@ void setup(){
   Serial.print("Num times fed: ");
   Serial.println(numFeed);
   if(shouldSaveConfig){saveConfigFile();}
-  // server.begin();
+  WiFi.mode(WIFI_STA);
+  if (MDNS.begin("catDash")) {
+    Serial.println("MDNS responder started"); //debug only
+  }
+  server.on("/", prepareHtmlPage);
+  server.onNotFound(handleNotFound);
+  server.begin();
   // wm.getWiFiSSID().toCharArray(ssid, wm.getWiFiSSID().length());
   // wm.getWiFiPass().toCharArray(pass, wm.getWiFiPass().length());
   // Blynk.begin(auth, ssid, pass);
@@ -276,13 +290,18 @@ void setup(){
   taskArray[i].period = periodStep;
   taskArray[i].elapsedTime = periodStep;
   taskArray[i].TickFct = &TickFct_Step;
+  i++;
+  taskArray[i].state = WF_Start;
+  taskArray[i].period = periodWifi;
+  taskArray[i].elapsedTime = periodWifi;
+  taskArray[i].TickFct = &TickFct_WF;
 }  
 
 volatile unsigned long timeTill = 0;
 const int stepCheck = 5000;
 void loop(){
   if(tFlag){
-    // Serial.println("Time");
+    Serial.println("Time");
     unsigned char i;
     for(i = 0; i < tasksNum; ++i){
       if(taskArray[i].elapsedTime >= taskArray[i].period){
@@ -323,7 +342,7 @@ void loop(){
       digitalWrite(inTwo, LOW);
       digitalWrite(inThr, LOW);
       digitalWrite(inFou, LOW);
-      // Serial.println("Lid Open");
+      Serial.println("Lid Open");
       openLid = 2;
     }
     else if(openLid == 0){
@@ -353,20 +372,20 @@ void loop(){
       digitalWrite(inTwo, LOW);
       digitalWrite(inThr, LOW);
       digitalWrite(inFou, LOW);
-      // Serial.println("Lid Closed");
+      Serial.println("Lid Closed");
       openLid = 2;
     }
   }
   if(rfidRead){
     if(!mfrc522.PICC_IsNewCardPresent()){return;}
-    // Serial.println("Trying to Read");
+    Serial.println("Trying to Read");
     if(mfrc522.PICC_ReadCardSerial()){
-        // Serial.println("Read");
+        Serial.println("Read");
         mfrc522.PICC_HaltA();
         tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
         if(tempUid == backwardsCollarUid){
           plate = 1;
-          // Serial.println("\tMatch");
+          Serial.println("\tMatch");
         }
         else{
           Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
@@ -442,12 +461,12 @@ int TickFct_MoSensor(int state){
     case Mos_Start:
       break;
     case Mos_Wait:
-      // Serial.println("Mos Wait");
+      Serial.println("Mos Wait");
       motionFlag = 0;
       motionCntr = 0;
       break;
     case Mos_Detd:
-      // Serial.println("Mos Detected");
+      Serial.println("Mos Detected");
       motionFlag = 1;
       motionCntr = 0;
       break;
@@ -494,7 +513,7 @@ int TickFct_RFID(int state){
     case RFID_Start:
       break;
     case RFID_off:
-      // Serial.println("Not Reading");
+      Serial.println("Not Reading");
       rfidRead = 0;
       break;
     case RFID_waitRead:
@@ -556,10 +575,10 @@ int TickFct_Step(int state){ // TODO: needs testing
     case Step_Start:
       break;
     case Step_off:
-      // Serial.println("Step Off");
+      Serial.println("Step Off");
       break;
     case Step_open:
-      // Serial.println("Step Open\n");
+      Serial.println("Step Open\n");
       openLid = 1;
       numFeed++;
       Serial.print(catNameResp);
@@ -569,16 +588,43 @@ int TickFct_Step(int state){ // TODO: needs testing
       break;
     case Step_hold:
       plate++;
-      // Serial.print("Step hold... ");
-      // Serial.println(plate);
+      Serial.print("Step hold... ");
+      Serial.println(plate);
       break;
     case Step_close:
-      // Serial.println("Step Close");
+      Serial.println("Step Close");
       plate = 0;
       openLid = 0;
       break;
     default:
       break;  
+  }
+  return state;
+}
+
+int TickFct_WF(int state){
+  switch (state)
+  {
+  case WF_Start:
+    state = WF_Do;
+    break;
+  case WF_Do:
+    state = WF_Do;
+    break;
+  default:
+    state = WF_Start;
+    break;
+  }
+  switch (state)
+  {
+  case WF_Start:
+    break;
+  case WF_Do:
+    server.handleClient();
+    MDNS.update();
+    break;
+  default:
+    break;
   }
   return state;
 }
@@ -705,24 +751,42 @@ void configModeCallback(WiFiManager *myWiFiManager)
 
 // Wifi Server Helper Functions ==========================================
 // prepare a web page to be send to a client (web browser)
-// String prepareHtmlPage()
-// {
-//   String htmlPage;
-//   htmlPage.reserve(1024);               // prevent ram fragmentation
-//   htmlPage = F("HTTP/1.1 200 OK\r\n"
-//                "Content-Type: text/html\r\n"
-//                "Connection: close\r\n"  // the connection will be closed after completion of the response
-//                "Refresh: 60\r\n"         // refresh the page automatically every 5 sec
-//                "\r\n"
-//                "<!DOCTYPE HTML>"
-//                "<html>"
-//                "");
-//   htmlPage = htmlPage + catNameResp + " has eaten " + static_cast<String>(numFeed) + " times";
-//   htmlPage += numFeed;
-//   htmlPage += F("</html>"
-//                 "\r\n");
-//   return htmlPage;
-// }
+void prepareHtmlPage()
+{
+  String htmlPage;
+  htmlPage.reserve(1024);               // prevent ram fragmentation
+  htmlPage = F("<html>\
+  <head>\
+    <meta http-equiv='refresh' content='5'/>\
+    <title>Cat Feeder Demo</title>\
+    <style>\
+      body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
+    </style>\
+  </head>\
+  <body>\
+    <h1>How is ");
+  htmlPage = htmlPage + catNameResp;
+  htmlPage = htmlPage + "?</h1>\ <p>" + catNameResp + " has eaten " + static_cast<String>(numFeed) + " times";
+  htmlPage = htmlPage + "</p>\ </body>\ </html>";
+  server.send(200, "text/html", htmlPage);
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+
+  server.send(404, "text/plain", message);
+}
 
 // This function is called every time the device is connected to the Blynk.Cloud
 // BLYNK_CONNECTED()
