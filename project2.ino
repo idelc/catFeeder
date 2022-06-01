@@ -45,14 +45,7 @@
 // WIFI definitions
 #define JSON_CONFIG_FILE "/test_config.json"
 
-// Blynk definitions
-#define BLYNK_TEMPLATE_ID           "TMPLmoqm3e2E"
-#define BLYNK_DEVICE_NAME           "Quickstart Device"
-#define BLYNK_AUTH_TOKEN            "uRi1Nb1g2Zk4JCakmvTZub8mUyJATaHh"
-// #define BLYNK_PRINT Serial
-
 //==========================
-
 
 // Init ESP8266 only and only Timer 1
 ESP8266Timer ITimer; 
@@ -63,12 +56,6 @@ bool attachInterruptInterval(unsigned long interval, timer_callback callback);
 
 // Init RFID
 MFRC522 mfrc522(SS_PIN, RST_PIN);
-// RFID Interrupt helpers
-// volatile bool bNewInt = false;
-// byte regVal = 0x7F;
-// void activateRec(MFRC522 mfrc522);
-// void clearInt(MFRC522 mfrc522); 
-// void readCard();
 int write_byte_array(byte *buffer, byte bufferSize);
 
 // Init WiFi
@@ -82,15 +69,6 @@ void configModeCallback(WiFiManager *myWiFiManager);
 ESP8266WebServer server(80);
 void prepareHtmlPage();
 void handleNotFound();
-// BlynkTimer timer;
-
-// // This function is called every time the device is connected to the Blynk.Cloud
-// BLYNK_CONNECTED();
-
-// // This function sends Arduino's uptime every second to Virtual Pin 2.
-// void myTimerEvent();
-// couldnt get Blynk to work for now
-
 
 // Task Struct for Task Scheduler
 typedef struct task{
@@ -133,11 +111,6 @@ unsigned long numFeed = 0;
 char catNameResp[50] = ""; 
 bool shouldSaveConfig = false;
 
-// Blynk vars
-// char auth[] = BLYNK_AUTH_TOKEN;
-// char ssid[] = "";
-// char pass[] = "";
-
 //==========================
 
 volatile int tFlag = 0;
@@ -159,6 +132,10 @@ int TickFct_Step(int state);
 enum WiFi_States{WF_Start, WF_Do};
 int TickFct_WF(int state);
 
+// ==========================================================================
+// Setup
+// ==========================================================================
+
 void setup(){ 
   // wifi init
   bool forceConfig = false;
@@ -168,7 +145,7 @@ void setup(){
     Serial.println(F("Forcing config mode as there is no saved config"));
     forceConfig = true;
   }
-  wm.resetSettings(); // TODO: remove when ready
+  wm.resetSettings(); // TODO: only for demo
   WiFi.mode(WIFI_STA);
   Serial.begin(9600);
   while (!Serial);
@@ -183,8 +160,6 @@ void setup(){
   WiFiManagerParameter numTimesFed("numTimesCatFed", "How many times cat has been fed", convertedValue, 7); 
   wm.addParameter(&catName);
   wm.addParameter(&numTimesFed);
-  // wm.setConfigPortalBlocking(false);
-  // wm.setConfigPortalTimeout(60);
   //automatically connect using saved credentials if they exist
   //If connection fails it starts an access point with the specified name
   if (forceConfig)
@@ -219,18 +194,9 @@ void setup(){
   server.on("/", prepareHtmlPage);
   server.onNotFound(handleNotFound);
   server.begin();
-  // wm.getWiFiSSID().toCharArray(ssid, wm.getWiFiSSID().length());
-  // wm.getWiFiPass().toCharArray(pass, wm.getWiFiPass().length());
-  // Blynk.begin(auth, ssid, pass);
-  // You can also specify server:
-  //Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
-  //Blynk.begin(auth, ssid, pass, IPAddress(192,168,1,100), 8080);
-
-  // Setup a function to be called every second
-  // timer.setInterval(1000L, myTimerEvent);
-  //catNameResp = catName.getValue();
+  
   // required 1 minute delay for the IR sensor to warm up
-  // reduced for wifi startup
+  // reduced to account for wifi startup
   Serial.println("Start up");
   delay(30000);
   Serial.println("Delay over");
@@ -246,25 +212,7 @@ void setup(){
   mfrc522.PCD_Init();
   delay(4);
   mfrc522.PCD_SetAntennaGain(mfrc522.RxGain_max); // max read distance
-  /* setup the IRQ pin*/
-  // pinMode(IRQ_PIN, INPUT_PULLUP);
-  /*
-   * Allow the ... irq to be propagated to the IRQ pin
-   * For test purposes propagate the IdleIrq and loAlert
-   */
-  // regVal = 0xA0; //rx irq
-  // mfrc522.PCD_WriteRegister(mfrc522.ComIEnReg, regVal);
-
-  // bNewInt = false; //interrupt flag
-
-  /*Activate the interrupt*/
-  // attachInterrupt(digitalPinToInterrupt(IRQ_PIN), readCard, FALLING);
-
-  // do { //clear a spourious interrupt at start
-  //   ;
-  // } while (!bNewInt);
-  // bNewInt = false;
-  
+ 
   // Stepper Motor Init
   pinMode(inOne, OUTPUT);
   pinMode(inTwo, OUTPUT);
@@ -272,9 +220,8 @@ void setup(){
   pinMode(inFou, OUTPUT);
   // Motion Sensor Init
   pinMode(moSens, INPUT);
-  // pinMode(LED_BUILTIN, OUTPUT);
 
-  // Scheduler Setup // TODO: Finish once the tasks are done
+  // Scheduler Setup
   unsigned i = 0;
   taskArray[i].state = Mos_Start;
   taskArray[i].period = periodMos;
@@ -296,6 +243,10 @@ void setup(){
   taskArray[i].elapsedTime = periodWifi;
   taskArray[i].TickFct = &TickFct_WF;
 }  
+
+// ==========================================================================
+// Loop
+// ==========================================================================
 
 volatile unsigned long timeTill = 0;
 const int stepCheck = 5000;
@@ -392,42 +343,6 @@ void loop(){
         }
       }
   }
-
-  // WiFiClient client = server.available();
-  // // wait for a client (web browser) to connect
-  // if (client)
-  // {
-  //   Serial.println("\n[Client connected]");
-  //   while (client.connected())
-  //   {
-  //     // read line by line what the client (web browser) is requesting
-  //     if (client.available())
-  //     {
-  //       String line = client.readStringUntil('\r');
-  //       Serial.print(line);
-  //       // wait for end of client's request, that is marked with an empty line
-  //       if (line.length() == 1 && line[0] == '\n')
-  //       {
-  //         client.println(prepareHtmlPage());
-  //         break;
-  //       }
-  //     }
-  //   }
-
-  //   while (client.available()) {
-  //     // but first, let client finish its request
-  //     // that's diplomatic compliance to protocols
-  //     // (and otherwise some clients may complain, like curl)
-  //     // (that is an example, prefer using a proper webserver library)
-  //     client.read();
-  //   }
-
-  //   // close the connection:
-  //   client.stop();
-  //   Serial.println("[Client disconnected]");
-  // }
-  // Blynk.run();
-  // timer.run();
 }
 
 int TickFct_MoSensor(int state){
@@ -518,31 +433,7 @@ int TickFct_RFID(int state){
       break;
     case RFID_waitRead:
       rfidRead = 1;
-      // tempUid = 0;
-      // if (bNewInt) { //new read interrupt
-      //   mfrc522.PICC_ReadCardSerial(); //read the tag data
-      //   clearInt(mfrc522);
-      //   mfrc522.PICC_HaltA();
-      //   bNewInt = false;
-      // }
-      // // The receiving block needs regular retriggering (tell the tag it should transmit??)
-      // // (mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg,mfrc522.PICC_CMD_REQA);)
-      // activateRec(mfrc522);
-      // if(write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size) == collarUid){
-      //   if(plate == 0){plate = 1;};
-      // }
-      // if(mfrc522.PICC_ReadCardSerial()){
-      //   Serial.println("Read");
-      //   mfrc522.PICC_HaltA();
-      //   tempUid = write_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
-      //   if(tempUid == backwardsCollarUid){
-      //     plate = 1;
-      //     Serial.println("\tMatch");
-      //   }
-      //   else{
-      //     Serial.print(tempUid); Serial.print(" not "); Serial.println(backwardsCollarUid);
-      //   }
-      // }
+      // TODO: maybe one day test if read can be done here safely?
       break;
     default:
       break;
@@ -640,28 +531,6 @@ int write_byte_array(byte *buffer, byte bufferSize) {
   }
   return retId;
 }
-/**
- * MFRC522 interrupt serving routine
- */
-// void readCard() {
-//   bNewInt = true;
-// }
-
-/*
- * The function sending to the MFRC522 the needed commands to activate the reception
- */
-// void activateRec(MFRC522 mfrc522) {
-//   mfrc522.PCD_WriteRegister(mfrc522.FIFODataReg, mfrc522.PICC_CMD_REQA);
-//   mfrc522.PCD_WriteRegister(mfrc522.CommandReg, mfrc522.PCD_Transceive);
-//   mfrc522.PCD_WriteRegister(mfrc522.BitFramingReg, 0x87);
-// }
-
-/*
- * The function to clear the pending interrupt bits after interrupt serving routine
- */
-// void clearInt(MFRC522 mfrc522) {
-//   mfrc522.PCD_WriteRegister(mfrc522.ComIrqReg, 0x7F);
-// }
 // END RFID Helper Functions ==================================================================
 
 // Wifi helper Functions=======================================================================
@@ -787,21 +656,3 @@ void handleNotFound() {
 
   server.send(404, "text/plain", message);
 }
-
-// This function is called every time the device is connected to the Blynk.Cloud
-// BLYNK_CONNECTED()
-// {
-//   // Change Web Link Button message to "Congratulations!"
-//   Blynk.setProperty(V3, "offImageUrl", "https://static-image.nyc3.cdn.digitaloceanspaces.com/general/fte/congratulations.png");
-//   Blynk.setProperty(V3, "onImageUrl",  "https://static-image.nyc3.cdn.digitaloceanspaces.com/general/fte/congratulations_pressed.png");
-//   Blynk.setProperty(V3, "url", "https://docs.blynk.io/en/getting-started/what-do-i-need-to-blynk/how-quickstart-device-was-made");
-// }
-
-// // This function sends Arduino's uptime every second to Virtual Pin 2.
-// void myTimerEvent()
-// {
-//   // You can send any value at any time.
-//   // Please don't send more that 10 values per second.
-//   Blynk.virtualWrite(V4, catNameResp);
-//   Blynk.virtualWrite(V2, numFeed);
-// }
